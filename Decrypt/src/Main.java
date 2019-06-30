@@ -35,21 +35,21 @@ public class Main {
 	 * @param md   メッセージダイジェスト
 	 * @param alg  秘密鍵のアルゴリズム
 	 * @param klen キー長と初期ベクタ長
-	 * @param enc  暗号文
+	 * @param enc  暗号
 	 * @param pwd  パスワード
 	 * @return 平文
 	 * @throws Exception 色々な例外が発生する
 	 */
 	public static byte[] decrypt(Cipher c, MessageDigest md, String alg, int klen, byte[] enc, byte[] pwd)
 			throws Exception {
-		byte[][] data = split(enc, 8, 8, enc.length - 16);// "Slated__", salt, data に分割する
+		// data[0]: "Salted__", data[1]: salt, data[2]: body
+		byte[][] data = split(enc, 8, 8, enc.length - 16);
 		if (!Arrays.equals(data[0], SALTED_MAGIC)) {// Satled__から始まらない
 			throw new IllegalArgumentException("Invalid Data Format.");
 		}
-		byte[] digest = md.digest(concat(pwd, data[1]));// password と salt を結合したバイト列からハッシュ値を求める
-		SecretKeySpec sks = new SecretKeySpec(digest, 0, klen, alg);// ハッシュ値の先頭から klen 個のバイト列が秘密鍵である
-		IvParameterSpec ips = new IvParameterSpec(digest, klen, klen);// ハッシュ値の秘密鍵の後方 klen 個のバイト列が初期ベクタである
-		c.init(Cipher.DECRYPT_MODE, sks, ips);
+		// digest値の先頭から klen 個のバイト列が秘密鍵で, その後方 klen 個のバイト列が初期ベクタである
+		byte[] digest = md.digest(concat(pwd, data[1]));
+		c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(digest, 0, klen, alg), new IvParameterSpec(digest, klen, klen));
 		return c.doFinal(data[2]);
 	}
 
