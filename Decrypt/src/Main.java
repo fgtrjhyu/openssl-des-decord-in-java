@@ -1,5 +1,4 @@
 import java.security.MessageDigest;
-import java.util.Arrays;
 import java.util.Base64;
 
 import javax.crypto.Cipher;
@@ -8,82 +7,81 @@ import javax.crypto.spec.SecretKeySpec;
 
 public class Main {
 
-	private static final byte[] SALTED_MAGIC = "Salted__".getBytes();
+  private static final byte[] MAGIC_SALTED = "Salted__".getBytes();
 
-	private static int add(int... list) {
-		int r = 0;
-		for (int e : list) {
-			r += e;
-		}
-		return r;
-	}
+  /**
+   * OpenSSLのencコマンドによるSalted(?)な暗号文を復号する<br>
+   * <p>
+   * Saltedな構造とは... <code>"Salted__" salt[8] body[*]</code> である.<br>
+   * <p>
+   * saltとpassphraseを使って符号化の際に用いた関数によるハッシュ値をnバイト/ブロックの先頭2ブロックを秘密鍵と初期ベクタとして使用する.<br>
+   * <code>(skey[n], ivec[n], _) = digest(passphrase[*].salt[8])</code><br>
+   * 
+   * @param cipher     暗号スイート
+   * @param md         メッセージダイジェスト
+   * @param alg        秘密鍵のアルゴリズム
+   * @param len        キー長と初期ベクタ長
+   * @param encoded    暗号
+   * @param passphrase パスフレーズ
+   * @return 平文
+   * @throws Exception 色々な例外が発生する
+   */
+  public static byte[] decrypt(Cipher cipher, MessageDigest md, String alg, int len, byte[] encoded, byte[] passphrase) throws Exception {
+    if (!eq(encoded, 0, MAGIC_SALTED, 0, sizeof(MAGIC_SALTED))) { // starts with "Salted_".
+      throw new IllegalArgumentException("Invalid Data Format.");
+    }
+    md.reset();
+    md.update(passphrase);
+    md.update(encoded, sizeof(MAGIC_SALTED), 8);
+    byte[] digest = md.digest();
+    cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(digest, 0, len, alg), new IvParameterSpec(digest, len, len));
+    return cipher.doFinal(encoded, 16, sizeof(encoded) - 16);
+  }
 
-	private static byte[] concat(byte[]... list) {
-		byte[] r = new byte[add(mapSizeof(list))];
-		int offset = 0;
-		for (byte[] e : list) {
-			System.arraycopy(e, 0, r, offset, e.length);
-			offset += e.length;
-		}
-		return r;
-	}
+  /**
+   * 2つのバイト配列の部分配列の要素が全て等しいかどうかを検査する.
+   * 
+   * @param left  左バイト配列
+   * @param lpos  左バイト配列の開始位置
+   * @param right 右バイト配列
+   * @param rpos  右バイト配列の開始位置
+   * @param len   比較する長さ
+   * @return 全ての要素が等しければ true, そうでなければ false
+   */
+  private static boolean eq(byte[] left, int lpos, byte[] right, int rpos, int len) {
+    return eqth(left, lpos, right, rpos, len) == len;
+  }
 
-	/**
-	 * OpenSSLのencコマンドによるSaltedな暗号文を復号する
-	 * 
-	 * @param c    暗号スイート
-	 * @param md   メッセージダイジェスト
-	 * @param alg  秘密鍵のアルゴリズム
-	 * @param klen キー長と初期ベクタ長
-	 * @param enc  暗号
-	 * @param pwd  パスワード
-	 * @return 平文
-	 * @throws Exception 色々な例外が発生する
-	 */
-	public static byte[] decrypt(Cipher c, MessageDigest md, String alg, int klen, byte[] enc, byte[] pwd)
-			throws Exception {
-		// data[0]: "Salted__", data[1]: salt, data[2]: body
-		byte[][] data = split(enc, 8, 8, enc.length - 16);
-		if (!Arrays.equals(data[0], SALTED_MAGIC)) {// Satled__から始まらない
-			throw new IllegalArgumentException("Invalid Data Format.");
-		}
-		// digest値の先頭から klen 個のバイト列が秘密鍵で, その後方 klen 個のバイト列が初期ベクタである
-		byte[] digest = md.digest(concat(pwd, data[1]));
-		c.init(Cipher.DECRYPT_MODE, new SecretKeySpec(digest, 0, klen, alg), new IvParameterSpec(digest, klen, klen));
-		return c.doFinal(data[2]);
-	}
+  /**
+   * 2つのバイト配列中の部分配列の要素が先頭から何個分等しいか数える.
+   * 
+   * @param left  左バイト配列
+   * @param lpos  左バイト配列の開始位置
+   * @param right 右バイト配列
+   * @param rpos  右バイト配列の開始位置
+   * @param len   比較する長さ
+   * @return 要素が等しい個数
+   */
+  private static int eqth(byte[] left, int lpos, byte[] right, int rpos, int len) {
+    int i = 0;
+    for (int lsz = sizeof(left), rsz = sizeof(right); i < len; ++i, ++lpos, ++rpos) {
+      if (!((lpos < lsz) && (rpos < rsz) && (left[lpos] == right[rpos]))) {
+        break;
+      }
+    }
+    return i;
+  }
 
-	public static void main(String[] args) throws Exception {
-		Cipher desCbc = Cipher.getInstance("DES/CBC/PKCS5Padding");
-		MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
-		String text = "U2FsdGVkX19Bsru7xG/2xhseKk0TR1bBX0YnIqfv3Tg=";
-		String password = "MyKey";
-		byte[] plain = decrypt(desCbc, sha256, "DES", 8, Base64.getDecoder().decode(text), password.getBytes());
-		System.err.println(new String(plain));
-	}
+  public static void main(String[] args) throws Exception {
+    Cipher desCbc = Cipher.getInstance("DES/CBC/PKCS5Padding");
+    MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+    String text = "U2FsdGVkX19Bsru7xG/2xhseKk0TR1bBX0YnIqfv3Tg=";
+    String password = "MyKey";
+    byte[] plain = decrypt(desCbc, sha256, "DES", 8, Base64.getDecoder().decode(text), password.getBytes());
+    System.err.println(new String(plain));
+  }
 
-	private static int[] mapSizeof(byte[][] list) {
-		int[] r = new int[sizeof(list)];
-		for (int i = 0, end = list.length; i < end; ++i) {
-			r[i] = sizeof(list[i]);
-		}
-		return r;
-	}
-
-	private static int sizeof(byte[] a) {
-		return a != null ? a.length : 0;
-	}
-
-	private static int sizeof(Object[] a) {
-		return a != null ? a.length : 0;
-	}
-
-	private static byte[][] split(byte[] data, int... nlen) {
-		byte[][] r = new byte[nlen.length][];
-		for (int i = 0, end = nlen.length, offset = 0; i < end; offset += nlen[i], ++i) {
-			System.arraycopy(data, offset, (r[i] = new byte[nlen[i]]), 0, nlen[i]);
-		}
-		return r;
-	}
-
+  private static int sizeof(byte[] a) {
+    return a != null ? a.length : 0;
+  }
 }
